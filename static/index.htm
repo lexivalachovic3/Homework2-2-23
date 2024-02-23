@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Salary Data Visualization with Custom Regression by Gender</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+
+    <style>
+      body, h1 {
+          font-family: 'Trebuchet MS', sans-serif;
+          font-size: 20px;
+      }
+      h1 {
+          font-size: 40px;
+          padding: 80px;
+          padding-bottom: 0;
+      }
+      input, select, button {
+          font-family: 'Trebuchet MS', sans-serif;
+          font-size: 20px;
+      }
+      input[type='number']{
+          width: 80px;
+      }
+      .gridlines .domain {
+          display: none;
+      }
+      .gridlines line {
+          stroke: #9b9b9b;  
+      }
+      .filters {
+          padding: 80px;
+      }
+      .plots-container {
+    display: flex;
+    }
+    .lineplots{
+        display: block;
+    }
+    #barchart {
+        width: 40%; 
+    }
+      </style>
+</head>
+<body>
+    <h1>Salary Data Visualization with Custom Regression by Gender</h1>
+    <label for="education-select">Filter by Education Level:</label> <!-- Added Dropdown -->
+    <select id="education-selector" multiple></select>
+    
+    <!-- <div id="plot"></div>
+    <div id="plot-age"></div> -->
+
+    <div class="plots-container">
+    <div class="lineplots">
+        <div id="plot"></div>
+        <div id="plot-age"></div></div>
+        <svg id="barchart" height="500" width="960" style="background: #fff;"></svg>
+    </div>
+    <div id="barchart"></div>
+
+
+    <!-- <svg id="barchart" height="500" width="960" style="background: #fff; margin-top: 20px;"></svg> -->
+
+    <script>
+      // Configurable dimensions
+      const dimensions = {
+        width: 960,
+        height: 500,
+        margin: { top: 20, right: 30, bottom: 60, left: 60 },
+      };
+
+      // Adjusted dimensions for plotting
+      const plotWidth = dimensions.width - dimensions.margin.left - dimensions.margin.right;
+      const plotHeight = dimensions.height - dimensions.margin.top - dimensions.margin.bottom;
+
+      // Function to load and process data
+      async function loadData() {
+  const data = await d3.csv('Salary_Data.csv');
+
+  console.log(data);
+
+  populateEducationSelector(data); // Populate the dropdown with Education Levels, some wierd ones bec bad data
+  processData(data);
+
+}
+
+// Populate the Education Level selector
+function populateEducationSelector(data) {
+  const educationLevels = Array.from(new Set(data.map(d => d["Education Level"].trim()))); // Trim spaces
+  const selector = d3.select("#education-selector");
+  selector.selectAll("option")
+    .data(educationLevels)
+    .enter()
+    .append("option")
+    .text(d => d)
+    .attr("value", d => d);
+
+    selector.on("change", function() {
+  const selectedEducationLevels = Array.from(selector.node().selectedOptions, option => option.value);
+  processData(data, selectedEducationLevels); // Pass the selected education levels for filtering
+  
+});
+}
+
+function processData(data, selectedEducationLevels = []) {
+  data.forEach(d => {
+    d.YearsOfExperience = +d["Years of Experience"];
+    // Check if d.Salary is a string and contains commas before attempting to replace, first time it is reqritten but not after
+    if (typeof d.Salary === 'string') {
+      d.Salary = +d.Salary.replace(/,/g, '');
+    } else {
+      // Directly convert to number if not a string (or already a number)
+      d.Salary = +d.Salary;
+    }
+    d.Gender = d.Gender;
+  });
+
+  let filteredData = data;
+  if (selectedEducationLevels.length > 0) {
+    filteredData = data.filter(d => selectedEducationLevels.includes(d["Education Level"]));
+  }
+  
+  initializePlot(filteredData); // Use filtered data to initialize the plot
+  initializePlotWithAge(filteredData); // Plot the new graph using Age
+
+  createBarChart(filteredData);
+}
+
+const svg = d3.select("#barchart");
+const width2 = svg.attr("width");
+const height2 = svg.attr("height");
+const margin = { top: 40, right: 40, bottom: 70, left: 40}; 
+const chartWidth = width2 - margin.left - margin.right;
+const chartHeight = height2 - margin.top - margin.bottom;
+const barchart = svg.append("g")
+        .attr("transform","translate("+margin.left+","+margin.top+")");
+
+function createBarChart(data) {
+        barchart.selectAll("*").remove();
+        const colorScale = d3.scaleOrdinal().domain(["Female", "Male"]).range(["#e65ddd", "#3555e2"]);
+
+        const filteredData = data.filter(d => d['Gender'] === 'Male' || d['Gender'] === 'Female');
+        const dataSplit = d3.group(filteredData, d => d['Gender']);
+        const newData = Array.from(dataSplit, ([gender, salary]) => ({ Gender: gender, AverageSalary: d3.mean(salary, d => d['Salary'])}));
+        
+        const salaryExtent = d3.max(newData, d => d['AverageSalary']);
+        const salaryScale = d3.scaleLinear().domain([0,salaryExtent]).range([chartHeight, 0]);
+        
+        const genders = ['Male', 'Female'];
+        const genderScale = d3.scaleBand().padding(0.1).domain(genders).range([0, chartWidth]);
+
+        //drawing bars
+        barchart.selectAll('rect.bar')
+                .data(newData)
+                .join( enter => enter.append('rect')
+                                    .attr('class','bar')
+                                    .attr("fill", d => colorScale(d['Gender']))
+                                    .attr("x", d => genderScale(d['Gender']))
+                                    .attr("y", d => salaryScale(d['AverageSalary']))
+                                    .attr("height", d =>  chartHeight - salaryScale(d['AverageSalary']))
+                                    .attr("width", genderScale.bandwidth()));
+
+        //adding labels
+        barchart.selectAll('text.label')
+                .data(newData)
+                .join(  enter => enter.append('text')
+                        .attr('class', 'label')
+                        .attr("x", d => genderScale(d['Gender']) + genderScale.bandwidth() / 2)
+                        .attr("y", d => salaryScale(d['AverageSalary']) - 10)
+                        .attr("text-anchor", "middle") 
+                        .text(d => `$${d3.format(",.2f")(d['AverageSalary'])}`) 
+                        .style("font-size", "25px")); 
+        barchart.selectAll('text.genderlabel')
+                .data(newData)
+                .join(  enter => enter.append('text')
+                        .attr('class', 'label')
+                        .attr("x", d => genderScale(d['Gender']) + genderScale.bandwidth() / 2)
+                        .attr("y", d => salaryScale(0) + 30)
+                        .attr("text-anchor", "middle") 
+                        .text(d => d['Gender']) 
+                        .style("font-size", "25px"));  
+    }
+
+
+      // Initialize plot area
+      function initializePlot(data) {
+  d3.select("#plot").html(""); // Clear the previous SVG to redraw
+  const svg = setupSVG();
+  const { xScale, yScale } = setupScales(data);
+  drawAxes(svg, xScale, yScale);
+  plotDataPoints(svg, data, xScale, yScale);
+  plotRegressionLines(data, svg, xScale, yScale);
+}
+
+      // Setup SVG
+      function setupSVG() {
+        const svg = d3.select("#plot").append("svg")
+            .attr("width", dimensions.width)
+            .attr("height", dimensions.height)
+          .append("g")
+            .attr("transform", `translate(${dimensions.margin.left},${dimensions.margin.top})`);
+        
+        return svg;
+      }
+
+      // Setup scales
+      function setupScales(data) {
+        const xScale = d3.scaleLinear()
+          .domain([0, d3.max(data, d => d.YearsOfExperience)])
+          .range([0, plotWidth]);
+        const yScale = d3.scaleLinear()
+          .domain([0, d3.max(data, d => d.Salary)])
+          .range([plotHeight, 0]);
+        return { xScale, yScale };
+      }
+
+      // Draw axes
+      function drawAxes(svg, xScale, yScale) {
+        // X axis
+        svg.append("g")
+          .attr("transform", `translate(0,${plotHeight})`)
+          .call(d3.axisBottom(xScale))
+          .append("text")
+          .attr("x", plotWidth / 2)
+          .attr("y", 40)
+          .attr("fill", "#000")
+          .text("Years of Experience");
+
+        // Y axis
+        svg.append("g")
+          .call(d3.axisLeft(yScale))
+          .append("text")
+          .attr("transform", "rotate(-90)")
+          .attr("y", -50)
+          .attr("x", -plotHeight / 2)
+          .attr("fill", "#000")
+          .text("Salary");
+      }
+
+      // Plot data points
+      function plotDataPoints(svg, data, xScale, yScale) {
+        svg.selectAll(".dot")
+          .data(data)
+          .enter().append("circle")
+          .attr("cx", d => xScale(d.YearsOfExperience))
+          .attr("cy", d => yScale(d.Salary))
+          .attr("r", 5)
+          .style("fill", d => d.Gender === "Female" ? "pink" : "blue");
+      }
+
+      function plotRegressionLines(data, svg, xScale, yScale) {
+        const genderData = separateDataByGender(data);
+        const regressionResults = calculateRegression(genderData);
+        // Pass `data` to `drawRegressionLines` to use it for calculating `xRange`
+        drawRegressionLines(data, svg, regressionResults, xScale, yScale);
+      }
+      
+
+      
+
+      // Function to separate data by gender
+      function separateDataByGender(data) {
+        const femaleData = data.filter(d => d.Gender === "Female").map(d => [d.YearsOfExperience, d.Salary]);
+        const maleData = data.filter(d => d.Gender === "Male").map(d => [d.YearsOfExperience, d.Salary]);
+        return { femaleData, maleData };
+      }
+
+      // Function to calculate regression for both genders
+      function calculateRegression({ femaleData, maleData }) {
+        const lrFemale = linearRegression(femaleData.map(d => d[1]), femaleData.map(d => d[0]));
+        const lrMale = linearRegression(maleData.map(d => d[1]), maleData.map(d => d[0]));
+        return { lrFemale, lrMale };
+      }
+
+          function calculateRegressionWithAge(data) {
+        // Assuming data is already filtered and contains Age, Salary, and Gender
+        const femaleData = data.filter(d => d.Gender === "Female").map(d => ({x: +d.Age, y: +d.Salary}));
+        const maleData = data.filter(d => d.Gender === "Male").map(d => ({x: +d.Age, y: +d.Salary}));
+
+        // Calculate regression for females
+        const lrFemale = linearRegression(femaleData.map(d => d.y), femaleData.map(d => d.x));
+        
+        // Calculate regression for males
+        const lrMale = linearRegression(maleData.map(d => d.y), maleData.map(d => d.x));
+
+        return { lrFemale, lrMale };
+    }
+
+          
+
+      // Corrected drawRegressionLines to accept `data` as a parameter
+      function drawRegressionLines(data, svg, { lrFemale, lrMale }, xScale, yScale) {
+        // Calculate `xRange` using `data` directly within this function
+        const xRange = d3.range(0, d3.max(data, d => d.YearsOfExperience) + 1);
+        plotLine(svg, lrFemale, xRange, xScale, yScale, "pink");
+        plotLine(svg, lrMale, xRange, xScale, yScale, "blue");
+      }
+
+      // Plot a single regression line
+      function plotLine(svg, lr, xRange, xScale, yScale, color) {
+        const linePoints = xRange.map(x => ({ x, y: lr.slope * x + lr.intercept }));
+        svg.append("path")
+          .datum(linePoints)
+          .attr("fill", "none")
+          .attr("stroke", color)
+          .attr("stroke-width", 2) // Adjusted stroke width for better visibility
+          .attr("d", d3.line()
+              .x(d => xScale(d.x))
+              .y(d => yScale(d.y)));
+      }
+
+      // Custom linear regression function
+      function linearRegression(y, x) {
+        var lr = {};
+        var n = y.length;
+        var sum_x = 0;
+        var sum_y = 0;
+        var sum_xy = 0;
+        var sum_xx = 0;
+        var sum_yy = 0;
+
+        for (var i = 0; i < n; i++) {
+            sum_x += x[i];
+            sum_y += y[i];
+            sum_xy += (x[i] * y[i]);
+            sum_xx += (x[i] * x[i]);
+            sum_yy += (y[i] * y[i]);
+        }
+
+        lr.slope = (n * sum_xy - sum_x * sum_y) / (n * sum_xx - sum_x * sum_x);
+        lr.intercept = (sum_y - lr.slope * sum_x) / n;
+        lr.r2 = Math.pow((n * sum_xy - sum_x * sum_y) / Math.sqrt((n * sum_xx - sum_x * sum_x) * (n * sum_yy - sum_y * sum_y)), 2);
+
+        return lr;
+      }
+
+      function initializePlotWithAge(data) {
+  d3.select("#plot-age").html(""); // Target the new div
+  const svg = d3.select("#plot-age").append("svg")
+      .attr("width", dimensions.width)
+      .attr("height", dimensions.height)
+    .append("g")
+      .attr("transform", `translate(${dimensions.margin.left},${dimensions.margin.top})`);
+
+  const xScale = d3.scaleLinear()
+    .domain([d3.min(data, d => d.Age), d3.max(data, d => d.Age)]) // Use Age for X-axis
+    .range([0, plotWidth]);
+
+  const yScale = d3.scaleLinear()
+    .domain([0, d3.max(data, d => d.Salary)])
+    .range([plotHeight, 0]);
+
+  // Draw axes (update labels accordingly)
+  // X axis for Age
+  svg.append("g")
+    .attr("transform", `translate(0,${plotHeight})`)
+    .call(d3.axisBottom(xScale))
+    .append("text")
+    .attr("x", plotWidth / 2)
+    .attr("y", 40)
+    .attr("fill", "#000")
+    .text("Age");
+
+  // Y axis remains the same
+  svg.append("g")
+    .call(d3.axisLeft(yScale))
+    .append("text")
+    .attr("transform", "rotate(-90)")
+    .attr("y", -50)
+    .attr("x", -plotHeight / 2)
+    .attr("fill", "#000")
+    .text("Salary");
+
+  // Plot data points
+  svg.selectAll(".dot")
+    .data(data)
+    .enter().append("circle")
+    .attr("cx", d => xScale(d.Age)) // Use Age for X-axis
+    .attr("cy", d => yScale(d.Salary))
+    .attr("r", 5)
+    .style("fill", d => d.Gender === "Female" ? "pink" : "blue");
+
+    const genderData = separateDataByGender(data);
+    const regressionResults = calculateRegressionWithAge(data);
+    plotRegressionLinesWithAge(data, svg, xScale, yScale, regressionResults);
+}
+
+function plotRegressionLinesWithAge(data, svg, xScale, yScale, regressionResults) {
+    const { lrFemale, lrMale } = regressionResults;
+
+    // Generate points for the regression line
+    const xRange = d3.range(d3.min(data, d => d.Age), d3.max(data, d => d.Age), 1);
+    const femaleLinePoints = xRange.map(x => ({ x, y: lrFemale.slope * x + lrFemale.intercept }));
+    const maleLinePoints = xRange.map(x => ({ x, y: lrMale.slope * x + lrMale.intercept }));
+
+    // Draw regression lines
+    // Female
+    svg.append("path")
+        .datum(femaleLinePoints)
+        .attr("fill", "none")
+        .attr("stroke", "pink")
+        .attr("stroke-width", 2)
+        .attr("d", d3.line()
+            .x(d => xScale(d.x))
+            .y(d => yScale(d.y)));
+
+    // Male
+    svg.append("path")
+        .datum(maleLinePoints)
+        .attr("fill", "none")
+        .attr("stroke", "blue")
+        .attr("stroke-width", 2)
+        .attr("d", d3.line()
+            .x(d => xScale(d.x))
+            .y(d => yScale(d.y)));
+}
+
+
+
+
+
+
+
+      loadData(); // Load and process the data
+    </script>
+</body>
+</html>
